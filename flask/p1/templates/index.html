@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="{{ url_for('static', filename='scripts.js') }}" defer></script>
+    <title>Task Manager</title>
+</head>
+<body>
+    <div class="container">
+        <h1>Task Manager</h1>
+        <form action="/add" method="post">
+            {{ form.hidden_tag() }}
+            {{ form.title.label }}<br>
+            {{ form.title(size=40) }}
+            {{ form.submit() }}
+        </form>
+        <ul>
+            {% for task in tasks %}
+            <li>
+                <span class="{{ 'completed' if task.completed else '' }}">{{ task.title }}</span>
+                <button class="toggle" data-id="{{ task.id }}">
+                    {{ 'Undo' if task. completed else 'Complete' }}
+                </button>
+                <form action="/delete/{{ task.id }}" method="post" style="display:inline;">
+                    <button type="submit">Delete</button>
+                </form>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+</body>
+</html>
