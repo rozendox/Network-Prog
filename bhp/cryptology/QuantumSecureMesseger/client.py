@@ -2,12 +2,12 @@ import asyncio
 from pqcrypto.kem.kyber512 import encrypt
 from key_gen import get_user_keys
 
+
 class SecureClient:
     def __init__(self, host="127.0.0.1", port=65432):
         self.host = host
         self.port = port
         self.ssl.context = self.setup.tls()
-
 
     async def send_message(self, receiver, message):
         public_key, private_key = get_user_keys(receiver)

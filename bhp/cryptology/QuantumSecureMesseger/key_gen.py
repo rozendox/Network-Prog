@@ -5,6 +5,7 @@ from database import SessionLocal, User
 
 KEYS_DIR = "keys"
 
+
 def generate_user_keys(username):
     public_key, secret_key = generate_keypair()
 
@@ -15,6 +16,7 @@ def generate_user_keys(username):
     db.close()
 
     print(f"User {username} keys generated.")
+
 
 def get_user_keys(username): # aqui a gente recupera as chaves de um user
     db = SessionLocal()
