@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 app = FastAPI()
-
+tuta
 
 # Modelo de dados para o endpoint POST
 class Item(BaseModel):
