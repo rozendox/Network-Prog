@@ -1,6 +1,0 @@
-# ninja log v6
-13	60	7518834369128207	CMakeFiles/Network_Prog.dir/bhc/keylogger.cpp.obj	7879c26d7ff047c0
-8	1367	7519299018815623	CMakeFiles/Network_Prog.dir/bhc/DDoS.cpp.obj	135039eb1c9f828c
-23	112	7519300333920531	Network_Prog.exe	fc8bb96c56d4f26
-2	274	7519521979431589	build.ninja	cbdb678c602699cf
-2	89	7519528092996351	CMakeFiles/Network_Prog.dir/bhc/DDos/DDoS_2.cpp.obj	ed7c8e48866561f1

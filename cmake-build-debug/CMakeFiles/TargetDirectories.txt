@@ -1,3 +1,0 @@
-C:/Users/roxyp/CLionProjects/Network-Prog/cmake-build-debug/CMakeFiles/Network_Prog.dir
-C:/Users/roxyp/CLionProjects/Network-Prog/cmake-build-debug/CMakeFiles/edit_cache.dir
-C:/Users/roxyp/CLionProjects/Network-Prog/cmake-build-debug/CMakeFiles/rebuild_cache.dir
