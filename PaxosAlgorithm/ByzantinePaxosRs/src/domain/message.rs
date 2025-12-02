@@ -1,3 +1,5 @@
+// src/domain/message.rs
+
 /// Representa os tipos de fases no algoritmo de consenso.
 /// Em um modelo Bizantino, fases adicionais como Commit são necessárias para garantir consistência.
 #[derive(Debug, Clone, PartialEq)]
@@ -47,8 +49,4 @@ impl ConsensusMessage {
             signature: sig,
         }
     }
-}    /// TODO: Verificar a assinatura digital da mensagem.
-    fn verify_signature(&self, public_key: &str) -> bool {
-        // Implementação de verificação de assinatura
-        true
-    }
+}
