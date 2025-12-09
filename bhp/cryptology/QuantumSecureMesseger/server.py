@@ -1,5 +1,4 @@
-"""
-
+r"""
 ______      ______  ___   __    ______
 /_____/\    /_____/\/__/\ /__/\ /_____/\
 \:::_ \ \   \:::__\/\::\_\\  \ \\:::_ \ \
@@ -7,108 +6,170 @@ ______      ______  ___   __    ______
   \: __ `\ \  /::/___ \:. _    \ \\:\ \ \ \
    \ \ `\ \ \/_:/____/\\. \`-\  \ \\:\/.:| |
     \_\/ \_\/\_______\/ \__\/ \__\/ \____/_/
-
-
 """
+
 import asyncio
 import ssl
-from pqcrypto.kem.kyber512 import decrypt  # This might be incorrect
-from pqcrypto.sign.dilithium3 import verify
+import traceback
+import oqs
+from typing import Tuple
+
 from database import SessionLocal, Message
-from key_gen import get_user_keys
+from key_gen import get_user_keys  # deve retornar (public_key_bytes, secret_key_bytes) para cada usuário
+
+
+def setup_tls() -> ssl.SSLContext:
+    ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    ssl_context.load_cert_chain(certfile="cert.pem", keyfile="key.pem")
+    return ssl_context
 
 
 class SecureServer:
-    def __init__(self, host="127.0.0.1", port=65432):
+    def __init__(self, host: str = "127.0.0.1", port: int = 65432):
         self.host = host
         self.port = port
-        self.ssl_context = self.setup_tls()  # Corrected attribute name
+        self.ssl_context = setup_tls()
 
-    def setup_tls(self):
-        ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        ssl_context.load_cert_chain(certfile="cert.pem", keyfile="key.pem")
-        return ssl_context
-
-    async def handle_client(self, reader, writer):
-        addr = writer.get_extra_info("peername")  # Corrected method name
+    async def handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        addr = writer.get_extra_info("peername")
         print(f"[SERVER]~ Connection from {addr}")
 
-        # Receive encrypted messages
-        ciphertext = await reader.read(4096)
-        sender, receiver, encrypted_msg = self.process_incoming_message(ciphertext)  # Corrected method name
+        try:
+            raw = await reader.read(16 * 1024)  # 16KB
+            if not raw:
+                print("[SERVER]~ No data received.")
+                return
 
-        # Save to database
-        db = SessionLocal()
-        msg = Message(sender=sender, receiver=receiver, message=encrypted_msg)
-        db.add(msg)
-        db.commit()
-        db.close()
+            sender, receiver, decrypted_message = self.process_incoming_message(raw)
 
-        print(f"[SERVER]~ Received message from {sender} to {receiver}")
-        writer.close()
+            # Save to DB
+            db = SessionLocal()
+            try:
+                msg = Message(sender=sender, receiver=receiver, message=decrypted_message)
+                db.add(msg)
+                db.commit()
+            finally:
+                db.close()
 
-    def process_incoming_message(self, ciphertext):
+            print(f"[SERVER]~ Stored message from {sender} to {receiver}")
+
+        except Exception as e:
+            print(f"[SERVER]~ Error handling client {addr}: {e}")
+            traceback.print_exc()
+
+        finally:
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
+
+    def process_incoming_message(self, raw: bytes) -> Tuple[str, str, str]:
         """
         Process received message:
-        1. Decrypt message using recipient's private key
-        2. Verify digital signature to authenticate sender
+          - parse parts
+          - decapsulate Kyber shared secret for receiver
+          - decrypt symmetric ciphertext (AES-GCM assumed)
+          - verify Dilithium3 signature (using oqs)
+        Returns: (sender, receiver, plaintext string)
         """
         try:
-            # 1. Split message into parts (metadata and encrypted content)
-            sender, receiver, encrypted_message, signature = self.parse_message(ciphertext)
+            sender, receiver, kem_cipher, encrypted_message, signature = self.parse_message(raw)
 
-            # 2. Retrieve recipient's keys
-            public_key_receiver, private_key_receiver = get_user_keys(receiver)
+            # Retrieve receiver keys: espera (public_key_bytes, secret_key_bytes)
+            pk_recv, sk_recv = get_user_keys(receiver)
+            if sk_recv is None:
+                raise ValueError(f"Secret key for receiver '{receiver}' not found")
 
-            # 3. Decrypt message with recipient's private key
-            decrypted_message = decrypt(private_key_receiver, encrypted_message)
+            # --- Kyber512 decapsulation (KEM) ---
+            with oqs.KeyEncapsulation("Kyber512") as kem:
+                # import_secret_key expects the secret key bytes as exported by oqs
+                kem.import_secret_key(sk_recv)
+                shared_secret = kem.decap_secret(kem_cipher)
+                # shared_secret is bytes
 
-            # 4. Retrieve sender's public key
-            public_key_sender, _ = get_user_keys(sender)
+            # --- Symmetric decryption (AES-GCM) ---
+            plaintext = self.symmetric_decrypt(shared_secret, encrypted_message)
 
-            # 5. Verify sender's digital signature
-            is_valid = verify(signature, decrypted_message, public_key_sender)
-            if not is_valid:
-                raise ValueError("Invalid digital signature! Message may have been tampered.")
+            # --- Verify Dilithium3 signature with oqs ---
+            pk_sender, _ = get_user_keys(sender)
+            if pk_sender is None:
+                raise ValueError(f"Public key for sender '{sender}' not found")
+
+            if not self.verify_dilithium3(signature, plaintext.encode(), pk_sender):
+                raise ValueError("Invalid digital signature (Dilithium3)")
 
             print(f"[SERVER] Message from {sender} to {receiver} authenticated successfully.")
-            return sender, receiver, decrypted_message
+            return sender, receiver, plaintext
 
         except Exception as e:
             print(f"[SERVER] Error processing message: {e}")
+            traceback.print_exc()
             raise
 
-    def parse_message(self, ciphertext):
+    @staticmethod
+    def verify_dilithium3(signature: bytes, message: bytes, public_key: bytes) -> bool:
         """
-        Split received message into parts: sender, receiver, content, and signature
+        Verifica assinatura Dilithium3 usando oqs.
+        oqs.Signature.verify(message, signature, public_key) -> True/False
         """
         try:
-            # Example: Simulate received message as concatenated bytes
-            # Format: [sender|receiver|encrypted_message|signature]
-            parts = ciphertext.split(b'|')
-            if len(parts) != 4:
-                raise ValueError("Invalid message format!")
-
-            sender = parts[0].decode()
-            receiver = parts[1].decode()
-            encrypted_message = parts[2]
-            signature = parts[3]
-            return sender, receiver, encrypted_message, signature
-
+            with oqs.Signature("Dilithium3") as sig:
+                return sig.verify(message, signature, public_key)
         except Exception as e:
-            print(f"[SERVER] Error splitting message: {e}")
-            raise
+            print(f"[SERVER] Error in signature verification: {e}")
+            return False
+
+    @staticmethod
+    def symmetric_decrypt(key: bytes, data: bytes) -> str:
+        """
+        Decifra data (bytes) com AES-GCM.
+        Formato esperado (convenção usada aqui):
+          nonce (12 bytes) | tag (16 bytes) | ciphertext (resto)
+        Usa key[:32] como chave AES-256.
+        Retorna string (utf-8) do plaintext.
+        """
+        from Crypto.Cipher import AES
+
+        if len(data) < 12 + 16:
+            raise ValueError("Encrypted payload too short")
+
+        nonce = data[:12]
+        tag = data[12:28]
+        ciphertext = data[28:]
+
+        cipher = AES.new(key[:32], AES.MODE_GCM, nonce=nonce)
+        plaintext = cipher.decrypt_and_verify(ciphertext, tag)
+        return plaintext.decode("utf-8", errors="strict")
+
+    @staticmethod
+    def parse_message(raw: bytes) -> Tuple[str, str, bytes, bytes, bytes]:
+        """
+        Formato esperado (bytes): sender|receiver|kem_cipher|encrypted_message|signature
+        OBS: esse formato falha se qualquer campo binário contiver o separador b'|'.
+        Para produção recomendo usar JSON+base64 ou framing com comprimentos.
+        """
+        parts = raw.split(b"|")
+        if len(parts) != 5:
+            raise ValueError("Invalid message format: expected 5 parts separated by '|'")
+
+        sender = parts[0].decode("utf-8")
+        receiver = parts[1].decode("utf-8")
+        kem_cipher = parts[2]
+        encrypted = parts[3]
+        signature = parts[4]
+
+        return sender, receiver, kem_cipher, encrypted, signature
 
     async def run(self):
         server = await asyncio.start_server(
-            self.handle_client, self.host, self.port, ssl=self.ssl_context  # Corrected attribute name
+            self.handle_client, self.host, self.port, ssl=self.ssl_context
         )
-        print(f"[SERVER]~ Server started at {self.host}:{self.port}")
+        print(f"[SERVER]~ Server running at {self.host}:{self.port}")
         async with server:
             await server.serve_forever()
 
 
-# Main execution
 if __name__ == "__main__":
     server = SecureServer()
     asyncio.run(server.run())
