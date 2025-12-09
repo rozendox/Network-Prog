@@ -1,27 +1,44 @@
-import os
-from pqcrypto.kem.kyber512 import generate_keypair
-from sqlalchemy.orm import Session
+import oqs
 from database import SessionLocal, User
 
-KEYS_DIR = "keys"
 
+def generate_user_keys(username: str):
+    """
+    Gera um par de chaves Kyber512 (Pós-Quântico)
+    e armazena no banco de dados.
+    """
 
-def generate_user_keys(username):
-    public_key, secret_key = generate_keypair()
+    # Cria objeto KEM Kyber512
+    kem = oqs.KeyEncapsulation("Kyber512")
 
+    # Gera (public_key, secret_key)
+    public_key = kem.generate_keypair()
+    secret_key = kem.export_secret_key()
+
+    # Salva no banco
     db = SessionLocal()
-    user = User(username=username, public_key=public_key, secret_key=secret_key)
+    user = User(
+        username=username,
+        public_key=public_key,
+        secret_key=secret_key,
+    )
     db.add(user)
     db.commit()
     db.close()
 
-    print(f"User {username} keys generated.")
+    print(f"[KEYGEN] Chaves Kyber512 geradas para '{username}'.")
 
 
-def get_user_keys(username): # aqui a gente recupera as chaves de um user
+def get_user_keys(username: str):
+    """
+    Obtém as chaves (public_key, secret_key) de um usuário no banco.
+    """
+
     db = SessionLocal()
     user = db.query(User).filter(User.username == username).first()
     db.close()
+
     if not user:
-        raise ValueError(f"User {username} not found.")
+        raise ValueError(f"[KEYGEN] Usuário '{username}' não encontrado.")
+
     return user.public_key, user.secret_key

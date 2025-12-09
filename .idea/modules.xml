@@ -3,7 +3,6 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/.idea/NetworkProg_Py.iml" filepath="$PROJECT_DIR$/.idea/NetworkProg_Py.iml" />
-      <module fileurl="file://$PROJECT_DIR$/.idea/Network_Prog.iml" filepath="$PROJECT_DIR$/.idea/Network_Prog.iml" />
     </modules>
   </component>
 </project>
