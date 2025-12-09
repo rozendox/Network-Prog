@@ -1,66 +1,128 @@
-# main.py
-
 import time
 import logging
+import random
+import threading
+import sys
 from typing import Dict, List
-from config_logs import setup_logging  # <--- Importa a configuração
+from config_logs import setup_logging
 
-# Importa as classes
 from proposer import Proposer
 from acceptor import Acceptor
 from learner import Learner
 from node import Node
 
+# Variável global para controlar o loop da thread
+SIMULATION_RUNNING = True
+
+
+def simulation_loop(all_nodes: List[Node], learners: Dict[str, Learner]):
+    """
+    Função que roda em uma Thread separada.
+    Ela processa as mensagens e avança o tempo da simulação.
+    """
+    cycle = 0
+    while SIMULATION_RUNNING:
+        cycle += 1
+        # Logging menos frequente para não poluir o terminal de comandos
+        if cycle % 5 == 0:
+            logging.info(f"--- CICLO {cycle} (Simulação rodando...) ---")
+
+        # Aleatoriedade na ordem de execução
+        random.shuffle(all_nodes)
+
+        for node in all_nodes:
+            try:
+                node.process_messages()
+            except Exception as e:
+                logging.error(f"Erro no nó {node.node_id}: {e}")
+
+        time.sleep(1.0)  # Velocidade da simulação (1 segundo por ciclo)
+
 
 def main():
-    # 1. INICIALIZAÇÃO DOS LOGS (Primeira coisa a fazer)
     setup_logging()
-
-    logging.info("--- SISTEMA PAXOS INICIALIZADO ---")
+    logging.info("--- SISTEMA PAXOS INTERATIVO INICIALIZADO ---")
 
     # --- Configuração ---
     ACCEPTOR_IDS = {"A1", "A2", "A3", "A4", "A5"}
     LEARNER_IDS = {"L1", "L2"}
 
-    # --- Instanciação dos Nós ---
-    acceptors: Dict[str, Acceptor] = {
-        id: Acceptor(id, LEARNER_IDS) for id in ACCEPTOR_IDS
-    }
-    learners: Dict[str, Learner] = {
-        id: Learner(id, ACCEPTOR_IDS) for id in LEARNER_IDS
-    }
+    acceptors = {id: Acceptor(id, LEARNER_IDS) for id in ACCEPTOR_IDS}
+    learners = {id: Learner(id, ACCEPTOR_IDS) for id in LEARNER_IDS}
 
-    proposer_1 = Proposer("P1", ACCEPTOR_IDS, initial_value="Valor_Original_P1")
-    proposer_2 = Proposer("P2", ACCEPTOR_IDS, initial_value="Valor_Concorrente_P2")
+    # Valores iniciais
+    proposer_1 = Proposer("P1", ACCEPTOR_IDS, initial_value="AZUL")
+    proposer_2 = Proposer("P2", ACCEPTOR_IDS, initial_value="VERMELHO")
 
-    all_nodes: List[Node] = list(acceptors.values()) + list(learners.values()) + [proposer_1, proposer_2]
+    all_nodes = list(acceptors.values()) + list(learners.values()) + [proposer_1, proposer_2]
 
-    logging.info(f"Total de Acceptors: {len(ACCEPTOR_IDS)}. Quorum necessário: {(len(ACCEPTOR_IDS) // 2) + 1}")
+    # --- Inicia a Thread de Simulação ---
+    sim_thread = threading.Thread(target=simulation_loop, args=(all_nodes, learners))
+    sim_thread.daemon = True  # Thread morre se o programa principal fechar
+    sim_thread.start()
 
-    # --- Simulação do Fluxo ---
+    # --- Loop de Comandos do Usuário ---
+    print("\n" + "=" * 50)
+    print("COMANDOS DISPONIVEIS:")
+    print("  status        -> Ver se o consenso foi atingido")
+    print("  p1 <valor>    -> P1 propõe um novo valor (ex: p1 AMARELO)")
+    print("  p2 <valor>    -> P2 propõe um novo valor")
+    print("  sair          -> Encerrar simulação")
+    print("=" * 50 + "\n")
 
-    # Passo 1: P1 inicia a primeira proposta
+    # P1 começa automaticamente
+    logging.info("Auto-iniciando P1 com valor AZUL...")
     proposer_1.start_proposal()
 
-    # Simula a passagem do tempo
-    for i in range(1, 4):
-        logging.info(f"--- CICLO DE REDE {i} ---")
+    global SIMULATION_RUNNING
 
-        # Cada nó processa as mensagens destinadas a ele
-        for node in all_nodes:
-            node.process_messages()
+    while True:
+        try:
+            # Input bloqueante (aguarda o usuário digitar)
+            user_input = input("CMD> ").strip().split()
 
-        # O P2 tenta concorrer a partir do ciclo 2
-        if i == 2:
-            logging.info("!!! P2 entrando para concorrer !!!")
-            proposer_2.start_proposal()
+            if not user_input:
+                continue
 
-        # Parar se o consenso for alcançado
-        if any(learner.is_learned for learner in learners.values()):
-            logging.info("--- Consenso Alcançado em todos os Learners. Encerrando Simulação. ---")
+            command = user_input[0].lower()
+
+            if command == "sair":
+                print("Encerrando simulação...")
+                SIMULATION_RUNNING = False
+                sim_thread.join()
+                break
+
+            elif command == "status":
+                print("\n--- STATUS ATUAL ---")
+                for l_id, l in learners.items():
+                    status = f"Valor: {l.learned_value}" if l.is_learned else "Ainda não decidiu"
+                    print(f"[{l_id}] {status}")
+                print("--------------------\n")
+
+            elif command == "p1":
+                if len(user_input) < 2:
+                    print("Erro: Digite o valor. Ex: p1 VERDE")
+                    continue
+                new_val = user_input[1]
+                logging.info(f"!!! COMANDO MANUAL: P1 vai propor '{new_val}' !!!")
+                proposer_1.current_value = new_val
+                proposer_1.start_proposal()
+
+            elif command == "p2":
+                if len(user_input) < 2:
+                    print("Erro: Digite o valor. Ex: p2 ROXO")
+                    continue
+                new_val = user_input[1]
+                logging.info(f"!!! COMANDO MANUAL: P2 vai propor '{new_val}' !!!")
+                proposer_2.current_value = new_val
+                proposer_2.start_proposal()
+
+            else:
+                print("Comando desconhecido.")
+
+        except KeyboardInterrupt:
+            SIMULATION_RUNNING = False
             break
-
-        time.sleep(0.5)
 
 
 if __name__ == "__main__":
