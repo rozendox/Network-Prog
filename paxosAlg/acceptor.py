@@ -1,20 +1,17 @@
 # acceptor.py
-
+import logging
 from node import Node
 from message import Message, PaxosMessageType
-from typing import Set
+from typing import Set, Optional, Any
 
 
 class Acceptor(Node):
-    """Implementa a função Acceptor no Paxos."""
-
     def __init__(self, node_id: str, all_learner_ids: Set[str]):
         super().__init__(node_id)
         self.all_learner_ids = all_learner_ids
-        # Estado do Acceptor
-        self.promised_id: Optional[int] = -1  # Maior proposal_id (n) prometido
-        self.accepted_id: Optional[int] = -1  # proposal_id (n) da última proposta aceita
-        self.accepted_value: Optional[Any] = None  # Valor (v) da última proposta aceita
+        self.promised_id: Optional[int] = -1
+        self.accepted_id: Optional[int] = -1
+        self.accepted_value: Optional[Any] = None
 
     def _handle_message(self, message: Message):
         if message.msg_type == PaxosMessageType.PREPARE:
@@ -22,72 +19,57 @@ class Acceptor(Node):
         elif message.msg_type == PaxosMessageType.ACCEPT:
             self._handle_accept(message)
         else:
-            print(f"[{self.node_id}] Recebeu tipo de mensagem inesperado: {message.msg_type}")
+            logging.warning(f"[{self.node_id}] Tipo inesperado: {message.msg_type}")
 
-    # --- FASE 1: Prepare/Promise ---
     def _handle_prepare(self, prepare_msg: Message):
         if prepare_msg.proposal_id > self.promised_id:
-            # 1. Promete não aceitar mais propostas com ID menor
             self.promised_id = prepare_msg.proposal_id
 
-            # 2. Responde com PROMISE
             promise_msg = Message(
                 sender_id=self.node_id,
                 receiver_id=prepare_msg.sender_id,
                 msg_type=PaxosMessageType.PROMISE,
-                proposal_id=self.promised_id,  # Retorna o ID que prometeu
-                accepted_proposal_id=self.accepted_id,  # Retorna o maior ID que já aceitou
-                value=self.accepted_value  # Retorna o valor associado
+                proposal_id=self.promised_id,
+                accepted_proposal_id=self.accepted_id,
+                value=self.accepted_value
             )
         else:
-            # Rejeita: Já prometeu para uma proposta com ID igual ou maior
+            # Opcional: Logar rejeição de prepare
+            # logging.info(f"[{self.node_id}] Rejeitando PREPARE {prepare_msg.proposal_id} <= {self.promised_id}")
             promise_msg = Message(
                 sender_id=self.node_id,
                 receiver_id=prepare_msg.sender_id,
                 msg_type=PaxosMessageType.PROMISE,
-                proposal_id=self.promised_id,  # Retorna o ID mais alto que viu
+                proposal_id=self.promised_id,
             )
 
         self.network.send_message(promise_msg)
 
-    # --- FASE 2: Accept/Accepted ---
     def _handle_accept(self, accept_msg: Message):
-        # Condição de aceitação: O ID da proposta deve ser >= ao ID prometido mais alto.
-        # Na prática, se o Acceptor não recebeu um PREPARE posterior, é igual.
         if accept_msg.proposal_id >= self.promised_id:
-            # 1. Aceita a proposta
-            self.promised_id = accept_msg.proposal_id  # Atualiza, garantindo que seja o mais alto
+            self.promised_id = accept_msg.proposal_id
             self.accepted_id = accept_msg.proposal_id
             self.accepted_value = accept_msg.value
 
-            # 2. Responde com ACCEPTED para o Proposer
-            accepted_msg_to_proposer = Message(
+            # Envia ACCEPTED de volta ao Proposer
+            accepted_msg = Message(
                 sender_id=self.node_id,
                 receiver_id=accept_msg.sender_id,
                 msg_type=PaxosMessageType.ACCEPTED,
                 proposal_id=self.accepted_id,
                 value=self.accepted_value
             )
-            self.network.send_message(accepted_msg_to_proposer)
+            self.network.send_message(accepted_msg)
 
-            # 3. Notifica todos os Learners
-            learn_msg = Message(
-                sender_id=self.node_id,
-                receiver_id="ALL_LEARNERS",  # Marca para broadcast (tratado pela Network ou main)
-                msg_type=PaxosMessageType.LEARN,
-                proposal_id=self.accepted_id,
-                value=self.accepted_value
-            )
-            # Na simulação, vamos enviar individualmente para cada learner
+            # Notifica Learners
             for learner_id in self.all_learner_ids:
-                learn_msg_clone = Message(
+                learn_msg = Message(
                     sender_id=self.node_id,
                     receiver_id=learner_id,
                     msg_type=PaxosMessageType.LEARN,
                     proposal_id=self.accepted_id,
                     value=self.accepted_value
                 )
-                self.network.send_message(learn_msg_clone)
+                self.network.send_message(learn_msg)
         else:
-            # Rejeita: ID de proposta menor que o ID prometido mais alto
-            print(f"[{self.node_id}] Rejeitou ACCEPT {accept_msg.proposal_id} < {self.promised_id}")
+            logging.info(f"[{self.node_id}] ❌ Rejeitou ACCEPT {accept_msg.proposal_id} < {self.promised_id}")
