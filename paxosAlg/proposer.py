@@ -4,6 +4,7 @@ from node import Node
 from message import Message, PaxosMessageType
 from typing import Set, Any, Dict, Optional
 
+
 class Proposer(Node):
     def __init__(self, node_id: str, all_acceptor_ids: Set[str], initial_value: Any):
         super().__init__(node_id)
